@@ -66,7 +66,7 @@ jobs:
         with:
           source: "github"
           github_pat: ${{ github.token }}
-          operator-sdk: "1.13.1"
+          operator-sdk: "1.14.0"
       - name: Get the 7-digit commit sha
         id: get_sha
         run: echo ::set-output name=git_sha::sha-$(git rev-parse --short=7 HEAD)
