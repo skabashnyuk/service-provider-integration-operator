@@ -77,8 +77,8 @@ jobs:
           fi
       - name: Check format
         run: |
-          go intall github.com/google/addlicense
-          go intall golang.org/x/tools/cmd/goimports
+          go install github.com/google/addlicense
+          go install golang.org/x/tools/cmd/goimports
           git reset HEAD --hard
           make check_fmt
           if [[ $? != 0 ]]
