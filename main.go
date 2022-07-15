@@ -57,22 +57,9 @@ func init() {
 	//+kubebuilder:scaffold:scheme
 }
 
-type cliArgs struct {
-	MetricsAddr          string `arg:"-m, --metrics-bind-address, env" default:":8080" help:"The address the metric endpoint binds to."`
-	ProbeAddr            string `arg:"-h, --health-probe-bind-address, env" default:":8081" help:"The address the probe endpoint binds to."`
-	EnableLeaderElection bool   `arg:"-l, --leader-elect, env" default:"false" help:"Enable leader election for controller manager. Enabling this will ensure there is only one active controller manager."`
-	ConfigFile           string `arg:"-c, --config-file, env" default:"/etc/spi/config.yaml" help:"The location of the configuration file."`
-	VaultInsecureTLS     bool   `arg:"-i, --vault-insecure-tls, env" default:"false" help:"Whether is allowed or not insecure vault tls connection."`
-	ZapDevel             bool   `arg:"-d, --zap-devel, env" default:"false" help:"Development Mode defaults(encoder=consoleEncoder,logLevel=Debug,stackTraceLevel=Warn) Production Mode defaults(encoder=jsonEncoder,logLevel=Info,stackTraceLevel=Error)"`
-	ZapEncoder           string `arg:"-e, --zap-encoder, env" default:"" help:"Zap log encoding (‘json’ or ‘console’)"`
-	ZapLogLevel          string `arg:"-v, --zap-log-level, env" default:"" help:"Zap Level to configure the verbosity of logging"`
-	ZapStackTraceLevel   string `arg:"-s, --zap-stacktrace-level, env" default:"" help:"Zap Level at and above which stacktraces are captured"`
-	ZapTimeEncoding      string `arg:"-t, --zap-time-encoding, env" default:"rfc3339" help:"one of 'epoch', 'millis', 'nano', 'iso8601', 'rfc3339' or 'rfc3339nano'"`
-}
-
 func main() {
 
-	args := cliArgs{}
+	args := config.SpiOperatorConfiguration{}
 	arg.MustParse(&args)
 	logs.InitLoggers(args.ZapDevel, args.ZapEncoder, args.ZapLogLevel, args.ZapStackTraceLevel, args.ZapTimeEncoding)
 	setupLog := ctrl.Log.WithName("setup")
