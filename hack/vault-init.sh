@@ -5,7 +5,7 @@ set -e
 
 NAMESPACE=${NAMESPACE:-spi-system}
 SECRET_NAME=spi-vault-keys
-POD_NAME=${POD_NAME:-spi-vault-0}
+POD_NAME=${POD_NAME:-vault-0}
 KEYS_FILE=${KEYS_FILE:-$( mktemp )}
 ROOT_TOKEN=""
 
