@@ -3,13 +3,16 @@ kind: Service
 metadata:
   labels:
     control-plane: controller-manager
+    prometheus-discovery: 'true'
   name: controller-manager-metrics-service
   namespace: system
 spec:
   ports:
-  - name: https
-    port: 8443
+  - name: metrics
+    port: 8080
     protocol: TCP
-    targetPort: https
+    targetPort: metrics
   selector:
     control-plane: controller-manager
+    app.kubernetes.io/name: service-provider-integration-operator
+
