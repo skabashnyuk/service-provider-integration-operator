@@ -17,7 +17,10 @@ jobs:
       - name: Create ../kube-linter/results directory for SARIF report files
         shell: bash
         run: mkdir -p ../kube-linter/results
-      - name: Checks production configuration
+      - name: Test
+        shell: bash
+        run: pwd && ls -la
+      - name: Generate production configuration
         shell: bash
         run: kustomize build ../../config/openshift/ >  ../kube-linter/deploy.yaml
       - name: Scan yaml files with kube-linter
