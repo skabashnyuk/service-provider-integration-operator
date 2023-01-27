@@ -47,9 +47,15 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       # This prepares directory where github/codeql-action/upload-sarif@v1 looks up report files by default.
+      - name: Create ./.kube-linter/ for deployment files
+        shell: bash
+        run: mkdir -p ./.kube-linter/
       - name: Generate production configuration
         shell: bash
-        run: mkdir -p ./.kube-linter/ && kustomize build config/openshift/ >  ./.kube-linter/deploy.yaml
+        run: kustomize build config/openshift/ >  ./.kube-linter/deploy-spi-openshift.yaml
+      - name: Generate vault configuration
+        shell: bash
+        run: kustomize build config/vault/openshift/ >  ./.kube-linter/deploy-vault-openshift.yaml
       - name: Scan yaml files with kube-linter
         uses: stackrox/kube-linter-action@v1
         id: kube-linter-action-scan
