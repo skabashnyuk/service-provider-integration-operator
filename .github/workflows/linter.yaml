@@ -53,6 +53,9 @@ jobs:
       - name: Generate production configuration
         shell: bash
         run: kustomize build config/openshift/ >  ./.kube-linter/deploy-spi-openshift.yaml
+      - name: Generate monitoring configuration
+        shell: bash
+        run: kustomize build config/monitoring/base >  ./.kube-linter/monitorings.yaml
       - name: Generate vault configuration
         shell: bash
         run: kustomize build config/vault/openshift/ >  ./.kube-linter/deploy-vault-openshift.yaml
