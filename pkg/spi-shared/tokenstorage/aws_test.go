@@ -1,11 +1,9 @@
 package tokenstorage
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/smithy-go/logging"
 	api "github.com/redhat-appstudio/service-provider-integration-operator/api/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"log"
@@ -124,28 +122,37 @@ func Test_secretManagerTokenStorage_Store(t *testing.T) {
 	// credentials, and shared configuration files
 	//cfg, err := config.LoadDefaultConfig(context.TODO(), config.WithRegion("us-east-1"))
 	// initialize a logger
-	var loggerBuf bytes.Buffer
-	logger := logging.NewStandardLogger(&loggerBuf)
-	defer loggerBuf.Reset()
+	//var loggerBuf bytes.Buffer
+	//logger := logging.NewStandardLogger(&loggerBuf)
+	//defer loggerBuf.Reset()
+	//cfg, err := config.LoadDefaultConfig(context.TODO(),
+	//	config.WithSharedCredentialsFiles(
+	//		[]string{"/Users/skabashn/dev/src/prod/aws/user_credentials"},
+	//	),
+	//	config.WithLogConfigurationWarnings(true),
+	//	config.WithLogger(logger),
+	//	config.WithRegion("us-east-1"),
+	//	config.WithSharedConfigFiles([]string{}),
+	//	//config.WithSharedConfigFiles(
+	//	//	[]string{"/Users/skabashn/dev/src/prod/aws/user_profile"},
+	//	//),
+	//)
 	cfg, err := config.LoadDefaultConfig(context.TODO(),
 		config.WithSharedCredentialsFiles(
-			[]string{"/Users/skabashn/dev/src/prod/aws/user_credentials"},
+			[]string{"/Users/skabashn/dev/src/redhat-appstudio/service-provider-integration-operator/.tmp/credentials"},
 		),
-		config.WithLogConfigurationWarnings(true),
-		config.WithLogger(logger),
-		config.WithRegion("us-east-1"),
-		config.WithSharedConfigFiles([]string{}),
-		//config.WithSharedConfigFiles(
-		//	[]string{"/Users/skabashn/dev/src/prod/aws/user_profile"},
-		//),
+		config.WithSharedConfigFiles(
+			[]string{"/Users/skabashn/dev/src/redhat-appstudio/service-provider-integration-operator/.tmp/config"},
+		),
 	)
 
 	if err != nil {
 		log.Fatalf("unable to load SDK config, %v", err)
 	}
+	fmt.Println(cfg.Region)
 	creds, err := cfg.Credentials.Retrieve(context.Background())
 	if err != nil {
-		t.Fatalf("expected no error, but received %v %s", err, loggerBuf.String())
+		t.Fatalf("expected no error, but received %v ", err)
 	}
 	//crd, err := cfg.Credentials
 	//crd, err := cfg.Credentials
@@ -154,6 +161,7 @@ func Test_secretManagerTokenStorage_Store(t *testing.T) {
 	//}
 	fmt.Println(creds.SecretAccessKey)
 	fmt.Println(creds.AccessKeyID)
+	fmt.Println(cfg.Region)
 
 	tokenStorage, err := NewSecretManagerTokenStorage(cfg)
 	if err != nil {
@@ -163,7 +171,7 @@ func Test_secretManagerTokenStorage_Store(t *testing.T) {
 	// create the token (and let its webhook and controller finish the setup)
 	accessToken := &api.SPIAccessToken{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "generated-spi-access-token-sdfsdf",
+			Name:      "generated-spi-access-token-3",
 			Namespace: "jdoe",
 		},
 	}
@@ -176,6 +184,15 @@ func Test_secretManagerTokenStorage_Store(t *testing.T) {
 	}
 
 	err = tokenStorage.Store(context.TODO(), accessToken, origToken)
+	if err != nil {
+		t.Fatalf("unable to load SDK config, %v", err)
+	}
+	tt, err := tokenStorage.Get(context.TODO(), accessToken)
+	if err != nil {
+		t.Fatalf("unable to load SDK config, %v", err)
+	}
+	fmt.Println(tt)
+	err = tokenStorage.Delete(context.TODO(), accessToken)
 	if err != nil {
 		t.Fatalf("unable to load SDK config, %v", err)
 	}
