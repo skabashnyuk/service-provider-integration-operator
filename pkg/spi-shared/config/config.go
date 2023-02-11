@@ -16,6 +16,8 @@ package config
 import (
 	"errors"
 	"fmt"
+	"github.com/go-playground/validator/v10"
+	"github.com/redhat-appstudio/service-provider-integration-operator/pkg/spi-shared/validators"
 	"io"
 	"os"
 	"strings"
@@ -36,7 +38,7 @@ type ServiceProviderType struct {
 //
 // Note: HostCredentials service provider does not belong here because it's not defined service provider
 // that can be configured in any form.
-var SupportedServiceProviderTypes []ServiceProviderType = []ServiceProviderType{
+var SupportedServiceProviderTypes = []ServiceProviderType{
 	ServiceProviderTypeGitHub,
 	ServiceProviderTypeGitLab,
 	ServiceProviderTypeQuay,
@@ -44,7 +46,7 @@ var SupportedServiceProviderTypes []ServiceProviderType = []ServiceProviderType{
 
 // HostCredentials service provider is used for service provider URLs that we don't support (are not in list of SupportedServiceProviderTypes).
 // We can still provide limited functionality for them like manual token upload.
-var ServiceProviderTypeHostCredentials ServiceProviderType = ServiceProviderType{
+var ServiceProviderTypeHostCredentials = ServiceProviderType{
 	Name: "HostCredentials",
 }
 
@@ -65,10 +67,11 @@ type LoggingCliArgs struct {
 // CommonCliArgs are the command line arguments and environment variable definitions understood by the configuration
 // infrastructure shared between the operator and the oauth service.
 type CommonCliArgs struct {
-	MetricsAddr string `arg:"--metrics-bind-address, env" default:"127.0.0.1:8080" help:"The address the metric endpoint binds to."`
-	ProbeAddr   string `arg:"--health-probe-bind-address, env" default:":8081" help:"The address the probe endpoint binds to."`
-	ConfigFile  string `arg:"--config-file, env" default:"/etc/spi/config.yaml" help:"The location of the configuration file."`
-	BaseUrl     string `arg:"--base-url, env" help:"The externally accessible URL on which the OAuth service is listening. This is used to construct manual-upload and OAuth URLs"`
+	MetricsAddr       string `arg:"--metrics-bind-address, env" default:"127.0.0.1:8080" help:"The address the metric endpoint binds to."`
+	ProbeAddr         string `arg:"--health-probe-bind-address, env" default:":8081" help:"The address the probe endpoint binds to."`
+	ConfigFile        string `arg:"--config-file, env" default:"/etc/spi/config.yaml" help:"The location of the configuration file."`
+	BaseUrl           string `arg:"--base-url, env" help:"The externally accessible URL on which the OAuth service is listening. This is used to construct manual-upload and OAuth URLs"`
+	AllowInsecureURLs bool   `arg:"--allow-insecure-urls, env" default:"false" help:"Whether is allowed or not to use insecure http URLs in service provider or vault configurations."`
 }
 
 // persistedConfiguration is the on-disk format of the configuration that references other files for shared secret
@@ -199,6 +202,23 @@ func LoadFrom(args *CommonCliArgs) (SharedConfiguration, error) {
 	cfg.BaseUrl = strings.TrimSuffix(args.BaseUrl, "/")
 
 	return *cfg, nil
+}
+
+func (args *CommonCliArgs) Validate() error {
+
+	if !args.AllowInsecureURLs {
+		validate := validator.New()
+		err := validate.RegisterValidation("https_only", validators.IsHttpsUrl)
+		if err != nil {
+			return fmt.Errorf("failed to initialize the validators: %w", err)
+		}
+		valError := validate.Struct(args)
+		if valError != nil {
+			return fmt.Errorf("failed to validate configuration: %w", valError)
+		}
+	}
+
+	return nil
 }
 
 // loadFrom loads the configuration from the provided file-system path. Note that the returned configuration is fully

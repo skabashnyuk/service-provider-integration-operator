@@ -15,6 +15,7 @@ package oauth
 
 import (
 	"fmt"
+	"github.com/redhat-appstudio/service-provider-integration-operator/pkg/spi-shared/config"
 	"os"
 	"strings"
 	"testing"
@@ -83,4 +84,15 @@ func parseWithEnv(cmdline string, env []string, dest interface{}) (*arg.Parser, 
 
 	// execute the parser
 	return p, p.Parse(parts)
+}
+
+func TestConfigValidate(t *testing.T) {
+	oauthConfig := OAuthServiceCliArgs{CommonCliArgs: config.CommonCliArgs{
+		AllowInsecureURLs: false,
+		BaseUrl:           "http://localhost.com",
+	}}
+	err := oauthConfig.Validate()
+	if err != nil {
+		t.Fatal(err)
+	}
 }

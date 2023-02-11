@@ -26,9 +26,6 @@ import (
 	"time"
 
 	"github.com/alexedwards/scs/v2"
-	"github.com/go-playground/validator/v10"
-	"github.com/redhat-appstudio/service-provider-integration-operator/pkg/spi-shared/validators"
-
 	"github.com/redhat-appstudio/service-provider-integration-operator/oauth/metrics"
 
 	"github.com/redhat-appstudio/service-provider-integration-operator/pkg/logs"
@@ -53,8 +50,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-var validate *validator.Validate
-
 func main() {
 	args := oauth.OAuthServiceCliArgs{}
 	arg.MustParse(&args)
@@ -64,27 +59,15 @@ func main() {
 	setupLog := ctrl.Log.WithName("setup")
 	setupLog.Info("Starting OAuth service with environment", "env", os.Environ(), "configuration", &args)
 
-	validate = validator.New()
-	var err error
-	if args.AllowInsecureURLs {
-		err = validate.RegisterValidation("https_only", validators.AlwaysTrue)
-	} else {
-		err = validate.RegisterValidation("https_only", validators.IsHttpsUrl)
-	}
+	err := args.Validate()
 	if err != nil {
-		setupLog.Error(err, "failed to initialize the validators")
+		setupLog.Error(err, "failed to validate the configuration")
 		os.Exit(1)
 	}
 
 	cfg, err := oauth.LoadOAuthServiceConfiguration(args)
 	if err != nil {
 		setupLog.Error(err, "failed to initialize the configuration")
-		os.Exit(1)
-	}
-
-	err = validate.Struct(cfg)
-	if err != nil {
-		setupLog.Error(err, "failed to validate the shared configuration")
 		os.Exit(1)
 	}
 
@@ -122,11 +105,6 @@ func main() {
 	}
 
 	vaultConfig := vaultstorage.VaultStorageConfigFromCliArgs(&args.VaultCliArgs)
-	err = validate.Struct(vaultConfig)
-	if err != nil {
-		setupLog.Error(err, "failed to validate the storage configuration")
-		os.Exit(1)
-	}
 	vaultConfig.MetricsRegisterer = metrics.Registry
 	strg, err := vaultstorage.NewVaultStorage(vaultConfig)
 	if err != nil {
@@ -174,7 +152,7 @@ func main() {
 		os.Exit(1)
 	}
 	routerCfg := oauth.RouterConfiguration{
-		OAuthServiceConfiguration: cfg,
+		OAuthServiceConfiguration: *cfg,
 		Authenticator:             authenticator,
 		StateStorage:              stateStorage,
 		K8sClient:                 cl,
