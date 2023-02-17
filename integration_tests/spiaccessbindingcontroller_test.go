@@ -1398,7 +1398,9 @@ var _ = Describe("SPIAccessTokenBinding", func() {
 				},
 			},
 			Behavior: ITestBehavior{
+
 				BeforeObjectsCreated: func() {
+					config.ResetValidator()
 					ITest.ValidationOptions = config.CustomValidationOptions{AllowInsecureURLs: false}
 					ITest.TestServiceProvider.GetBaseUrlImpl = func() string {
 						return "http://abc.foo"

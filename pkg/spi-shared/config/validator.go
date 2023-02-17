@@ -39,11 +39,15 @@ func getInstance() *validator.Validate {
 }
 
 func ValidateStruct(s interface{}) error {
-	log.Log.Info(fmt.Sprintf("INSTANCE ON VALIDATE %p", getInstance()))
+	log.Log.Info(fmt.Sprintf("INSTANCE ON VALIDATE %p", getInstance()), "obj", s)
 	return getInstance().Struct(s)
 }
 
 func SetupCustomValidations(options CustomValidationOptions) error {
+	log.Log.Info(fmt.Sprintf("INSTANCE ON VALIDATE %p", getInstance()))
+	log.Log.Info("-------SetupCustomValidations------", "AllowInsecureURLs", options.AllowInsecureURLs)
+	log.Log.Info(fmt.Sprintf("INSTANCE ON VALIDATE %p", getInstance()))
+
 	var err error
 	if options.AllowInsecureURLs {
 		err = getInstance().RegisterValidation("https_only", alwaysTrue)
@@ -52,6 +56,9 @@ func SetupCustomValidations(options CustomValidationOptions) error {
 		err = getInstance().RegisterValidation("https_only", isHttpsUrl)
 	}
 	return err
+}
+func ResetValidator() {
+	validatorInstance = validator.New()
 }
 
 func isHttpsUrl(fl validator.FieldLevel) bool {
