@@ -47,7 +47,6 @@ func OkHandler(w http.ResponseWriter, _ *http.Request) {
 // This page is a landing page after successfully completing the OAuth flow.
 // Resource file location is prefixed with `../` to be compatible with tests running locally.
 func CallbackSuccessHandler(w http.ResponseWriter, r *http.Request) {
-	writeCSPHeaders(w)
 	http.ServeFile(w, r, "../static/callback_success.html")
 }
 
@@ -74,7 +73,6 @@ func CallbackErrorHandler(w http.ResponseWriter, r *http.Request) {
 	err := tmpl.Execute(w, data)
 	if err == nil {
 		w.WriteHeader(http.StatusOK)
-		writeCSPHeaders(w)
 	} else {
 		log.FromContext(r.Context()).Error(err, "failed to process template")
 		w.WriteHeader(http.StatusInternalServerError)
@@ -145,6 +143,15 @@ func HandleUpload(uploader TokenUploader) func(http.ResponseWriter, *http.Reques
 	}
 }
 
+// CSPHandler is a Handler that redirects a request that has URL with certain prefix to a bypassHandler
+// all remaining requests are redirected to mainHandler.
+func CSPHandler(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; img-src https://*.redhat.com; frame-ancestors 'none';")
+		h.ServeHTTP(w, r)
+	})
+}
+
 // BypassHandler is a Handler that redirects a request that has URL with certain prefix to a bypassHandler
 // all remaining requests are redirected to mainHandler.
 func BypassHandler(mainHandler http.Handler, bypassPathPrefixes []string, bypassHandler http.Handler) http.Handler {
@@ -166,7 +173,7 @@ func BypassHandler(mainHandler http.Handler, bypassPathPrefixes []string, bypass
 // - CORS processing
 func MiddlewareHandler(reg prometheus.Registerer, allowedOrigins []string, h http.Handler) http.Handler {
 
-	middlewareHandler := HttpServiceInstrumentMetricHandler(reg,
+	middlewareHandler := CSPHandler(HttpServiceInstrumentMetricHandler(reg,
 		handlers.LoggingHandler(&zapio.Writer{Log: zap.L(), Level: zap.DebugLevel},
 			handlers.CORS(handlers.AllowedOrigins(allowedOrigins),
 				handlers.AllowCredentials(),
@@ -175,7 +182,7 @@ func MiddlewareHandler(reg prometheus.Registerer, allowedOrigins []string, h htt
 					"Accept-Language",
 					"Content-Language",
 					"Origin",
-					"Authorization"}))(h)))
+					"Authorization"}))(h))))
 
 	return BypassHandler(middlewareHandler, []string{"/health", "/ready"}, h)
 }
