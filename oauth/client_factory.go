@@ -17,6 +17,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	cli "github.com/redhat-appstudio/service-provider-integration-operator/cmd/oauth/oauthcli"
+	"github.com/redhat-appstudio/service-provider-integration-operator/pkg/spi-shared/httptransport"
 	"io"
 	"net/http"
 	"net/url"
@@ -37,25 +39,32 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// AuthenticatingClient is just a typedef that advertises that it is safe to use the WithAuthIntoContext or
-// WithAuthFromRequestIntoContext functions with clients having this type.
-type AuthenticatingClient client.Client
-
-type ClientFactoryConfig struct {
-	KubeInsecureTLS bool
-	KubeConfig      string
-	ApiServer       string
-	ApiServerCAPath string
+type K8sClientFactoryBuilder struct {
+	Args cli.OAuthServiceCliArgs
 }
 
-type ClientFactory struct {
-	FactoryConfig ClientFactoryConfig
-	HTTPClient    rest.HTTPClient
-}
+func (r K8sClientFactoryBuilder) CreateInClusterClientFactory() (clientFactory K8sClientFactory, err error) {
+	mapper := meta.NewDefaultRESTMapper([]schema.GroupVersion{})
+	mapper.Add(corev1.SchemeGroupVersion.WithKind("Secret"), meta.RESTScopeNamespace)
+	clientOptions, errClientOptions := clientOptions(mapper)
+	if errClientOptions != nil {
+		return nil, errClientOptions
+	}
+	if r.Args.KubeConfig != "" {
+		restConfig, err := clientcmd.BuildConfigFromFlags("", r.Args.KubeConfig)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create rest configuration: %w", err)
+		}
+		return &InClusterK8sClientFactory{ClientOptions: clientOptions, RestConfig: restConfig}, nil
+	}
+	restConfig, err := rest.InClusterConfig()
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize in-cluster config: %w", err)
+	}
+	return &InClusterK8sClientFactory{ClientOptions: clientOptions, RestConfig: restConfig}, nil
 
-// CreateUserAuthClientForNamespace creates a new client based on the provided configuration. We use this client for k8s requests with user's token (e.g.: SelfSubjectAccessReview).
-// Note that configuration is potentially modified during the call.
-func (f ClientFactory) CreateUserAuthClientForNamespace(ctx context.Context, namespace string) (AuthenticatingClient, error) {
+}
+func (r K8sClientFactoryBuilder) CreateUserAuthClientFactory() (clientFactory K8sClientFactory, err error) {
 	// we can't use the default dynamic rest mapper, because we don't have a token that would enable us to connect
 	// to the cluster just yet. Therefore, we need to list all the resources that we are ever going to query using our
 	// client here thus making the mapper not reach out to the target cluster at all.
@@ -63,53 +72,139 @@ func (f ClientFactory) CreateUserAuthClientForNamespace(ctx context.Context, nam
 	mapper.Add(authz.SchemeGroupVersion.WithKind("SelfSubjectAccessReview"), meta.RESTScopeRoot)
 	mapper.Add(v1beta1.GroupVersion.WithKind("SPIAccessToken"), meta.RESTScopeNamespace)
 	mapper.Add(v1beta1.GroupVersion.WithKind("SPIAccessTokenDataUpdate"), meta.RESTScopeNamespace)
-
-	return f.createClient(ctx, mapper, namespace, true)
-}
-
-// CreateInClusterClient creates a new client based on the provided configuration. We use this client for k8s requests with ServiceAccount (e.g.: reading configuration secrets).
-func (f ClientFactory) CreateInClusterClient() (client.Client, error) {
-	mapper := meta.NewDefaultRESTMapper([]schema.GroupVersion{})
-	mapper.Add(corev1.SchemeGroupVersion.WithKind("Secret"), meta.RESTScopeNamespace)
-
-	return f.createClient(context.TODO(), mapper, "", false)
-}
-
-func (f ClientFactory) createClient(ctx context.Context, mapper meta.RESTMapper, namespace string, userAuthentication bool) (client.Client, error) {
-	kubeconfig, err := baseKubernetesConfig(ctx, &f.FactoryConfig, namespace, &f.HTTPClient, userAuthentication)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create kubernetes incluster config: %w", err)
-	}
-
-	kubeconfig, err = customizeKubeconfig(kubeconfig, &f.FactoryConfig, userAuthentication)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create kubernetes incluster config: %w", err)
-	}
-
 	clientOptions, errClientOptions := clientOptions(mapper)
 	if errClientOptions != nil {
 		return nil, errClientOptions
 	}
 
-	cl, err := client.New(kubeconfig, *clientOptions)
+	// here we're essentially replicating what is done in rest.InClusterConfig() but we're using our own
+	// configuration - this is to support going through an alternative API server to the one we're running with...
+	// Note that we're NOT adding the Token or the TokenFile to the configuration here. This is supposed to be
+	// handled on per-request basis...
+	cfg := &rest.Config{}
+
+	apiServerUrl, err := url.Parse(r.Args.ApiServer)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse the API server URL: %w", err)
+	}
+
+	cfg.Host = "https://" + apiServerUrl.Host
+
+	tlsConfig := rest.TLSClientConfig{}
+
+	if r.Args.ApiServerCAPath != "" {
+		// rest.InClusterConfig is doing this most possibly only for early error handling so let's do the same
+		if _, err := certutil.NewPool(r.Args.ApiServerCAPath); err != nil {
+			return nil, fmt.Errorf("expected to load root CA config from %s, but got err: %w", r.Args.ApiServerCAPath, err)
+		} else {
+			tlsConfig.CAFile = r.Args.ApiServerCAPath
+		}
+	}
+
+	cfg.TLSClientConfig = tlsConfig
+
+	if r.Args.ApiServer != "" {
+		return &WorkspaceAwareK8sClientFactory{
+			ClientOptions: clientOptions,
+			RestConfig:    cfg,
+			ApiServer:     r.Args.ApiServer,
+			HTTPClient: &http.Client{
+				Transport: httptransport.HttpMetricCollectingRoundTripper{
+					RoundTripper: http.DefaultTransport}}}, nil
+	}
+	return &UserAuthK8sClientFactory{ClientOptions: clientOptions, RestConfig: cfg}, nil
+}
+
+type K8sClientFactory interface {
+	CreateClient(ctx context.Context) (client.Client, error)
+}
+
+type WorkspaceAwareK8sClientFactory struct {
+	ClientOptions *client.Options
+	RestConfig    *rest.Config
+	ApiServer     string
+	HTTPClient    rest.HTTPClient
+}
+
+func (w WorkspaceAwareK8sClientFactory) CreateClient(ctx context.Context) (client.Client, error) {
+	namespace := ctx.Value("namespace")
+	if namespace != "" {
+		lg := log.FromContext(ctx)
+		wsEndpoint := path.Join(w.ApiServer, "apis/toolchain.dev.openshift.com/v1alpha1/workspaces") //TODO: configurable path ?
+		req, reqErr := http.NewRequestWithContext(ctx, "GET", wsEndpoint, nil)
+		if reqErr != nil {
+			lg.Error(reqErr, "failed to create request for the workspace API", "url", wsEndpoint)
+			return nil, fmt.Errorf("error while constructing HTTP request for workspace context to %s: %w", wsEndpoint, reqErr)
+		}
+		resp, err := w.HTTPClient.Do(req)
+		if err != nil {
+			lg.Error(err, "failed to request the workspace API", "url", wsEndpoint)
+			return nil, fmt.Errorf("error performing HTTP request for workspace context to %v: %w", wsEndpoint, err)
+		}
+
+		defer func() {
+			if err := resp.Body.Close(); err != nil {
+				lg.Error(err, "Failed to close response body doing workspace fetch")
+			}
+		}()
+
+		if resp.StatusCode == http.StatusOK {
+			bodyBytes, err := io.ReadAll(resp.Body)
+			if err != nil {
+				fmt.Print(err.Error())
+			}
+			wsList := &v1alpha1.WorkspaceList{}
+			json.Unmarshal(bodyBytes, wsList)
+			for _, ws := range wsList.Items {
+				for _, ns := range ws.Status.Namespaces {
+					if ns.Name == namespace {
+						w.RestConfig.APIPath = path.Join("workspaces", ws.Name)
+						cl, err := client.New(w.RestConfig, *w.ClientOptions)
+						if err != nil {
+							return nil, fmt.Errorf("failed to create a kubernetes client: %w", err)
+						}
+						return cl, nil
+					}
+				}
+			}
+			return nil, fmt.Errorf("target workspace not found for namespace %s", namespace)
+		} else {
+			lg.Info("unexpected return code for workspace api", "url", wsEndpoint, "code", resp.StatusCode)
+			return nil, fmt.Errorf("bad status (%d) when performing HTTP request for workspace context to %v: %w", resp.StatusCode, wsEndpoint, err)
+		}
+	}
+	cl, err := client.New(w.RestConfig, *w.ClientOptions)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create a kubernetes client: %w", err)
 	}
-
 	return cl, nil
 }
 
-func customizeKubeconfig(kubeconfig *rest.Config, args *ClientFactoryConfig, userAuthentication bool) (*rest.Config, error) {
-	// insecure mode only allowed when the trusted root certificate is not specified...
-	if args.KubeInsecureTLS && kubeconfig.TLSClientConfig.CAFile == "" {
-		kubeconfig.Insecure = true
-	}
+type UserAuthK8sClientFactory struct {
+	ClientOptions *client.Options
+	RestConfig    *rest.Config
+}
 
-	if userAuthentication {
-		AugmentConfiguration(kubeconfig)
+func (u UserAuthK8sClientFactory) CreateClient(ctx context.Context) (client.Client, error) {
+	cl, err := client.New(u.RestConfig, *u.ClientOptions)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create a kubernetes client: %w", err)
 	}
+	return cl, nil
+}
 
-	return kubeconfig, nil
+type InClusterK8sClientFactory struct {
+	ClientOptions *client.Options
+	RestConfig    *rest.Config
+}
+
+func (i InClusterK8sClientFactory) CreateClient(ctx context.Context) (client.Client, error) {
+
+	cl, err := client.New(i.RestConfig, *i.ClientOptions)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create a kubernetes client: %w", err)
+	}
+	return cl, nil
 }
 
 func clientOptions(mapper meta.RESTMapper) (*client.Options, error) {
@@ -131,104 +226,4 @@ func clientOptions(mapper meta.RESTMapper) (*client.Options, error) {
 	}
 
 	return options, nil
-}
-
-// baseKubernetesConfig returns proper configuration based on given cli args. `userAuthentication=true` allows setting apiserver url in cli args
-// and enables using bearer token in authorization header to authenticate kubernetes requests. This is used for requests we're doing on behalf of end-user.
-// If `kubeconfig` is set in cli args, it is always used.
-func baseKubernetesConfig(ctx context.Context, args *ClientFactoryConfig, namespace string, httpClient *rest.HTTPClient, userAuthentication bool) (*rest.Config, error) {
-	if args.KubeConfig != "" {
-		cfg, err := clientcmd.BuildConfigFromFlags("", args.KubeConfig)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create rest configuration: %w", err)
-		}
-
-		return cfg, nil
-	} else if userAuthentication && args.ApiServer != "" {
-		// here we're essentially replicating what is done in rest.InClusterConfig() but we're using our own
-		// configuration - this is to support going through an alternative API server to the one we're running with...
-		// Note that we're NOT adding the Token or the TokenFile to the configuration here. This is supposed to be
-		// handled on per-request basis...
-		cfg := &rest.Config{}
-
-		apiServerUrl, err := url.Parse(args.ApiServer)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse the API server URL: %w", err)
-		}
-
-		cfg.Host = "https://" + apiServerUrl.Host
-
-		tlsConfig := rest.TLSClientConfig{}
-
-		if args.ApiServerCAPath != "" {
-			// rest.InClusterConfig is doing this most possibly only for early error handling so let's do the same
-			if _, err := certutil.NewPool(args.ApiServerCAPath); err != nil {
-				return nil, fmt.Errorf("expected to load root CA config from %s, but got err: %w", args.ApiServerCAPath, err)
-			} else {
-				tlsConfig.CAFile = args.ApiServerCAPath
-			}
-		}
-
-		cfg.TLSClientConfig = tlsConfig
-
-		if namespace != "" {
-			wsPath, err := calculateWorkspaceSubpath(ctx, args.ApiServer, *httpClient, namespace)
-			if err != nil {
-				return nil, fmt.Errorf("failed to prepare workspace context for client in namespace %s: %w", namespace, err)
-			}
-			cfg.APIPath = wsPath
-		}
-
-		return cfg, nil
-	} else {
-		cfg, err := rest.InClusterConfig()
-		if err != nil {
-			return nil, fmt.Errorf("failed to initialize in-cluster config: %w", err)
-		}
-		return cfg, nil
-	}
-}
-
-// calculateWorkspaceSubpath fetches all accessible workspaces for user and finds out one that given namespace belongs to,
-// and constructs API URL sub-path
-func calculateWorkspaceSubpath(ctx context.Context, apiServer string, client rest.HTTPClient, namespace string) (string, error) {
-	lg := log.FromContext(ctx)
-	wsEndpoint := path.Join(apiServer, "apis/toolchain.dev.openshift.com/v1alpha1/workspaces") //TODO: configurable path ?
-	req, reqErr := http.NewRequestWithContext(ctx, "GET", wsEndpoint, nil)
-	if reqErr != nil {
-		lg.Error(reqErr, "failed to create request for the workspace API", "url", wsEndpoint)
-		return "", fmt.Errorf("error while constructing HTTP request for workspace context to %s: %w", wsEndpoint, reqErr)
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		lg.Error(err, "failed to request the workspace API", "url", wsEndpoint)
-		return "", fmt.Errorf("error performing HTTP request for workspace context to %v: %w", wsEndpoint, err)
-	}
-
-	defer func() {
-		if err := resp.Body.Close(); err != nil {
-			lg.Error(err, "Failed to close response body doing workspace fetch")
-		}
-	}()
-
-	if resp.StatusCode == http.StatusOK {
-		bodyBytes, err := io.ReadAll(resp.Body)
-		if err != nil {
-			fmt.Print(err.Error())
-		}
-		wsList := &v1alpha1.WorkspaceList{}
-		json.Unmarshal(bodyBytes, wsList)
-		for _, ws := range wsList.Items {
-			for _, ns := range ws.Status.Namespaces {
-				if ns.Name == namespace {
-					return path.Join("workspaces", ws.Name), nil
-				}
-			}
-		}
-		return "", fmt.Errorf("target workspace not found for namespace %s", namespace)
-	} else {
-		lg.Info("unexpected return code for workspace api", "url", wsEndpoint, "code", resp.StatusCode)
-		return "", fmt.Errorf("bad status (%d) when performing HTTP request for workspace context to %v: %w", resp.StatusCode, wsEndpoint, err)
-	}
-
 }
