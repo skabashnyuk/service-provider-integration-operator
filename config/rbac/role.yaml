@@ -169,6 +169,32 @@ rules:
 - apiGroups:
   - appstudio.redhat.com
   resources:
+  - spiaccesstokenuploads
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - appstudio.redhat.com
+  resources:
+  - spiaccesstokenuploads/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - appstudio.redhat.com
+  resources:
+  - spiaccesstokenuploads/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - appstudio.redhat.com
+  resources:
   - spifilecontentrequests
   verbs:
   - create
