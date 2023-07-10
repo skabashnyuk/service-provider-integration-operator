@@ -41,6 +41,15 @@ spec:
                   data should live. This is specified as time with a unit (30m, 2h).
                   A special value of "-1" means infinite lifetime.
                 type: string
+              oauth:
+                properties:
+                  scopes:
+                    description: Scopes are the list of OAuth scopes that this token
+                      possesses
+                    items:
+                      type: string
+                    type: array
+                type: object
               repoUrl:
                 description: RepoUrl is just the URL of the repository for which the
                   access token is requested.

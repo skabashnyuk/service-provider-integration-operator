@@ -31,11 +31,18 @@ type SPIAccessTokenUploadSpec struct {
 	// Secret is the specification of the secret that should contain the access token.
 	// The secret will be created in the same namespace as this binding object.
 	Secret rapi.LinkableSecretSpec `json:"secret"`
-
+	// +optional
+	OAuth OAuthSpec `json:"oauth"`
 	// Lifetime specifies how long the binding and its associated data should live.
 	// This is specified as time with a unit (30m, 2h). A special value of "-1" means
 	// infinite lifetime.
 	Lifetime string `json:"lifetime,omitempty"`
+}
+
+type OAuthSpec struct {
+	// Scopes are the list of OAuth scopes that this token possesses
+	// +optional
+	Scopes []string `json:"scopes"`
 }
 
 // SPIAccessTokenUploadStatus defines the observed state of SPIAccessTokenUpload
