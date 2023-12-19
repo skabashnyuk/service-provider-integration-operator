@@ -138,6 +138,7 @@ jobs:
           GOMEGA_DEFAULT_EVENTUALLY_TIMEOUT: 10s
         run: |
           set -x
+          make envtest
           cd pact
           go mod tidy
           make test-verbose
