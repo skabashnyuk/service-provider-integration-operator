@@ -128,11 +128,6 @@ jobs:
             git --no-pager diff
             exit 1
           fi
-      - name: Setup KinD
-        uses: chainguard-dev/actions/setup-kind@main
-        with:
-          k8s-version: ${{ env.K8S_VERSION }}
-          kind-version: ${{ env.KIND_VERSION }}
       - name: Install Pact
         run: |
           go get github.com/pact-foundation/pact-go/v2@2.x.x
@@ -143,6 +138,7 @@ jobs:
           GOMEGA_DEFAULT_EVENTUALLY_TIMEOUT: 10s
         run: |
           set -x
+          make install
           cd pact
           go mod tidy
           make test-verbose
