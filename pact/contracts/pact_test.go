@@ -31,8 +31,14 @@ import (
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 
-	oauth "github.com/redhat-appstudio/service-provider-integration-operator/oauth"
+	"github.com/redhat-appstudio/service-provider-integration-operator/oauth"
 )
+
+func init() {
+	go func() {
+		defer GinkgoRecover()
+	}()
+}
 
 func TestContracts(t *testing.T) {
 	// Register fail handler and setup test environment (same as during unit tests)
