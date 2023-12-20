@@ -16,8 +16,11 @@ package oauth
 
 import (
 	"context"
+	"fmt"
 	"net/http"
+	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	kubernetes2 "github.com/redhat-appstudio/remote-secret/pkg/kubernetesclient"
@@ -80,13 +83,27 @@ func StartTestEnv() (struct {
 	ctx, IT.Cancel = context.WithCancel(context.TODO())
 
 	By("bootstrapping test environment")
+	for _, e := range os.Environ() {
+		pair := strings.SplitN(e, "=", 2)
+		fmt.Println(pair[0])
+	}
+	CRDDirectoryPath := filepath.Join("..", "config", "crd", "bases")
+	_, err = os.Stat(CRDDirectoryPath)
+	if err != nil && os.IsNotExist(err) {
+		CRDDirectoryPath = filepath.Join("..", CRDDirectoryPath)
+		_, err = os.Stat(CRDDirectoryPath)
+		if err != nil && os.IsNotExist(err) {
+			panic(err)
+		}
+
+	}
 
 	IT.TestEnvironment = &envtest.Environment{
 		ControlPlane: envtest.ControlPlane{
 			APIServer: &envtest.APIServer{},
 		},
 		AttachControlPlaneOutput: true,
-		CRDDirectoryPaths:        []string{filepath.Join("..", "config", "crd", "bases")},
+		CRDDirectoryPaths:        []string{CRDDirectoryPath},
 		ErrorIfCRDPathMissing:    true,
 	}
 	IT.TestEnvironment.ControlPlane.APIServer.Configure().
